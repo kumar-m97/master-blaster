@@ -1,0 +1,7 @@
+# Backend Module Terraform Variables
+# Use this when provisioning the backend resources (S3 + DynamoDB)
+
+aws_region = "us-east-1"
+environment = "dev"
+project_name = "eks-cluster"
+aws_account_id = "XXXXXXXXXXXX"  # Replace with your AWS Account ID

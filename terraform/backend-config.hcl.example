@@ -1,0 +1,9 @@
+# Backend Configuration Example
+# Use this when running: terraform init -backend-config=backend-config.hcl
+# First, cd to terraform/ directory and create an actual backend-config.hcl from this template
+
+bucket         = "eks-terraform-state-XXXXXXXXXXXX"  # Replace with your AWS Account ID
+key            = "eks/terraform.tfstate"
+region         = "us-east-1"
+encrypt        = true
+dynamodb_table = "eks-cluster-terraform-lock"
