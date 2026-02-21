@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Frontend App – EKS</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+    }
+    .container {
+      text-align: center;
+      padding: 2rem;
+    }
+    h1 { font-size: 3rem; margin-bottom: 1rem; color: #e94560; }
+    p  { font-size: 1.2rem; color: #a8b2d8; margin-bottom: 0.5rem; }
+    .badge {
+      display: inline-block;
+      margin-top: 1.5rem;
+      padding: 0.4rem 1rem;
+      background: #e94560;
+      border-radius: 20px;
+      font-size: 0.9rem;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🚀 Frontend App</h1>
+    <p>Deployed on <strong>Amazon EKS</strong></p>
+    <p>Served via <strong>NGINX Ingress Controller</strong></p>
+    <span class="badge">Node.js · Kubernetes · Helm</span>
+  </div>
+</body>
+</html>

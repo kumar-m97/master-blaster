@@ -1,0 +1,107 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Default values for the frontend Helm chart.
+# Override these via --set or a custom values file during deployment.
+# ──────────────────────────────────────────────────────────────────────────────
+
+replicaCount: 2
+
+image:
+  # Replace with your ECR registry URL after pushing the image
+  repository: <AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/frontend-app
+  pullPolicy: IfNotPresent
+  # Overridden by the Jenkinsfile with the exact build tag (e.g. git short SHA)
+  tag: "latest"
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    # Uncomment to enable TLS via cert-manager
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: frontend.example.com   # Replace with your actual domain name
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  # Uncomment and configure to enable HTTPS
+  # tls:
+  #   - secretName: frontend-tls
+  #     hosts:
+  #       - frontend.example.com
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 3000
+  initialDelaySeconds: 15
+  periodSeconds: 20
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 3000
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  failureThreshold: 3
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - frontend
+          topologyKey: kubernetes.io/hostname
