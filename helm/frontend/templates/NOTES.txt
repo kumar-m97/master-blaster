@@ -1,0 +1,37 @@
+🎉 frontend has been deployed successfully!
+
+=== IMPORTANT – Required customisations ===
+
+1. Domain name (Ingress host)
+   The default domain is set to "frontend.example.com".
+   Replace it with your actual domain:
+
+     helm upgrade {{ .Release.Name }} helm/frontend \
+       --set ingress.hosts[0].host=<YOUR_DOMAIN>
+
+2. Container image
+   Update the ECR repository URL and tag to match your build:
+
+     --set image.repository=<AWS_ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/frontend-app \
+     --set image.tag=<GIT_SHA>
+
+3. DNS record
+   Point a CNAME for your domain to the NGINX Ingress LoadBalancer:
+
+     kubectl get svc -n ingress-nginx ingress-nginx-controller \
+       -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+
+=== Accessing the application ===
+
+  http{{ if .Values.ingress.tls }}s{{ end }}://{{ (index .Values.ingress.hosts 0).host }}
+
+=== Useful commands ===
+
+  # Check pod status
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+  # View logs
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} -f
+
+  # Check ingress
+  kubectl get ingress -n {{ .Release.Namespace }}

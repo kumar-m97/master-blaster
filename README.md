@@ -1,4 +1,50 @@
-# AWS EKS Cluster Terraform Project
+# AWS EKS Cluster – End-to-End Deployment Guide
+
+This repository contains everything needed to **build, scan, and deploy a Node.js frontend application** on Amazon EKS — from infrastructure provisioning with Terraform to automated CI/CD with Jenkins and Helm.
+
+---
+
+## Repository Structure
+
+```
+master-blaster/
+├── app/                         # Node.js frontend application
+│   ├── Dockerfile               # Multi-stage Docker build
+│   ├── .dockerignore
+│   ├── package.json
+│   ├── index.js                 # Express server (health/ready probes + SPA)
+│   └── public/
+│       └── index.html           # Static frontend
+├── helm/
+│   └── frontend/                # Helm chart for Kubernetes deployment
+│       ├── Chart.yaml
+│       ├── values.yaml          # Default values (override at deploy time)
+│       └── templates/
+│           ├── _helpers.tpl
+│           ├── deployment.yaml
+│           ├── service.yaml
+│           ├── ingress.yaml
+│           ├── hpa.yaml
+│           └── serviceaccount.yaml
+├── Jenkinsfile                  # CI/CD pipeline definition
+├── terraform/                   # Infrastructure-as-code (EKS cluster)
+│   ├── main.tf
+│   ├── variables.tf
+│   ├── outputs.tf
+│   ├── terraform.tfvars
+│   ├── backend-config.hcl.example
+│   ├── backend/
+│   └── modules/
+│       ├── vpc/
+│       ├── iam/
+│       ├── security_groups/
+│       └── eks/
+└── README.md
+```
+
+---
+
+## Part 1 – Infrastructure: Provision EKS with Terraform
 
 This Terraform project provisions a production-ready Amazon EKS (Elastic Kubernetes Service) cluster on AWS using **reusable Terraform modules** with remote state management. The infrastructure is organized into modular components for easy maintenance and scalability.
 
@@ -398,3 +444,195 @@ For issues or improvements, please refer to the project documentation or contact
 ## License
 
 This Terraform configuration is provided as-is for AWS EKS cluster provisioning.
+
+---
+
+## Part 2 – Application: Build, Scan & Deploy to EKS
+
+### 2.1 Node.js Application
+
+The sample Express.js application lives in `app/`. It:
+
+- Serves a static HTML page from `app/public/`
+- Exposes `/health` and `/ready` endpoints for Kubernetes probes
+- Listens on `PORT` (default `3000`)
+
+Run locally:
+
+```bash
+cd app
+npm install
+npm start
+# Visit http://localhost:3000
+```
+
+---
+
+### 2.2 Multi-stage Dockerfile
+
+`app/Dockerfile` uses a **two-stage build**:
+
+| Stage | Base image | Purpose |
+|-------|-----------|---------|
+| `builder` | `node:18-alpine` | Install deps, run tests, prune devDependencies |
+| `production` | `node:18-alpine` | Copy only runtime artefacts; run as non-root user |
+
+Build and run the image locally:
+
+```bash
+cd app
+docker build -t frontend-app:local .
+docker run -p 3000:3000 frontend-app:local
+```
+
+---
+
+### 2.3 Amazon ECR – Create Repository
+
+```bash
+export AWS_REGION=us-east-1
+export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+export ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+aws ecr create-repository \
+  --repository-name frontend-app \
+  --region ${AWS_REGION} \
+  --image-scanning-configuration scanOnPush=true
+```
+
+---
+
+### 2.4 NGINX Ingress Controller on EKS
+
+Install (or confirm) the NGINX Ingress Controller so Kubernetes `Ingress` resources are served:
+
+```bash
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+
+helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx \
+  --create-namespace \
+  --set controller.service.type=LoadBalancer \
+  --wait
+```
+
+Find the external hostname/IP of the LoadBalancer:
+
+```bash
+kubectl get svc -n ingress-nginx ingress-nginx-controller \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+```
+
+Create a DNS `CNAME` record pointing your domain (e.g. `frontend.example.com`) to this hostname.
+
+---
+
+### 2.5 Deploy with Helm (manual)
+
+```bash
+export IMAGE_TAG=<git-sha-or-version>
+
+helm upgrade --install frontend helm/frontend \
+  --namespace frontend \
+  --create-namespace \
+  --set image.repository="${ECR_REGISTRY}/frontend-app" \
+  --set image.tag="${IMAGE_TAG}" \
+  --set ingress.hosts[0].host="frontend.example.com" \
+  --set ingress.hosts[0].paths[0].path="/" \
+  --set ingress.hosts[0].paths[0].pathType="Prefix" \
+  --atomic \
+  --wait
+```
+
+Verify:
+
+```bash
+kubectl get all -n frontend
+kubectl get ingress -n frontend
+```
+
+---
+
+### 2.6 CI/CD Pipeline with Jenkins
+
+#### Required Jenkins plugins
+
+| Plugin | Purpose |
+|--------|---------|
+| Pipeline | Declarative pipeline support |
+| Git | SCM checkout |
+| Docker Pipeline | `docker.build()` DSL |
+| AWS Credentials | Bind `AWS_CREDENTIALS` |
+| Kubernetes CLI | `kubectl` steps |
+
+#### Jenkins credentials to configure
+
+| Credential ID | Kind | Description |
+|---------------|------|-------------|
+| `AWS_CREDENTIALS` | AWS Credentials | IAM user with ECR + EKS access |
+
+#### Jenkins global tools
+
+- **NodeJS** installation named `NodeJS-18` (Node.js 18 LTS)
+
+#### Pipeline stages
+
+```
+Checkout → Install & Test → Build Docker Image → Scan Image (Trivy)
+    → Push to ECR → ✋ Manual Approval → Deploy to EKS → Verify
+```
+
+1. **Checkout** – checks out the `main` branch via SCM
+2. **Install & Test** – runs `npm ci` and `npm test` inside `app/`
+3. **Build Docker Image** – runs the multi-stage `docker build`
+4. **Scan Image** – runs [Trivy](https://github.com/aquasecurity/trivy); fails on CRITICAL/HIGH CVEs; archives the report
+5. **Push to ECR** – authenticates with `aws ecr get-login-password` and pushes two tags: `<git-sha>` and `latest`
+6. **Approval** – interactive gate; pipeline pauses until a human approves in the Jenkins UI
+7. **Deploy to EKS** – runs `aws eks update-kubeconfig` then `helm upgrade --install` with the new image tag
+8. **Verify** – checks rollout status, lists pods and ingress
+
+#### Creating the Jenkins job
+
+1. In Jenkins click **New Item → Pipeline**
+2. Under **Pipeline**, set **Definition** to `Pipeline script from SCM`
+3. Point SCM to this repository, branch `main`, script path `Jenkinsfile`
+4. Add the build parameters (`ECR_REGISTRY`, `AWS_REGION`, `EKS_CLUSTER_NAME`, `DOMAIN_NAME`) or set them as environment variables on the agent
+
+#### Example run
+
+```bash
+# Trigger via Jenkins CLI (optional)
+java -jar jenkins-cli.jar -s http://<jenkins-url> build frontend-pipeline \
+  -p ECR_REGISTRY=<account>.dkr.ecr.us-east-1.amazonaws.com \
+  -p EKS_CLUSTER_NAME=my-eks-cluster \
+  -p DOMAIN_NAME=frontend.example.com
+```
+
+---
+
+### 2.7 End-to-End Checklist
+
+- [ ] **EKS cluster** provisioned with Terraform (Part 1)
+- [ ] **ECR repository** `frontend-app` created
+- [ ] **NGINX Ingress Controller** installed in `ingress-nginx` namespace
+- [ ] **DNS record** pointing your domain to the Ingress LoadBalancer
+- [ ] **Jenkins** configured with `AWS_CREDENTIALS`, `NodeJS-18` tool, and pipeline job
+- [ ] Pipeline triggered on every push to `main`; image scanned, approved, and deployed
+- [ ] Application accessible at `http(s)://frontend.example.com`
+
+---
+
+### 2.8 TLS / HTTPS (optional)
+
+Install [cert-manager](https://cert-manager.io/) and create a `ClusterIssuer` for Let's Encrypt, then
+uncomment the `cert-manager.io/cluster-issuer` annotation and `tls` section in `helm/frontend/values.yaml`.
+
+```bash
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager \
+  --create-namespace \
+  --set installCRDs=true
+```
